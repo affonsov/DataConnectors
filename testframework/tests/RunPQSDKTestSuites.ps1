@@ -3,7 +3,7 @@
        Script: RunPQSDKTestSuites.ps1
        Runs the pre-built PQ/PQOut format tests in Power Query SDK Test Framework using pqtest.exe compare command.
 
-      .DESCRIPTION
+       .DESCRIPTION
        This script will execute the PQ SDK PQ/PQOut tests present under Sanity, Standard & DataSourceSpecific folders. 
        RunPQSDKTestSuitesSettings.json file is used provide configurations need to this script. Please review the template RunPQSDKTestSuitesSettingsTemplate.json for more info.
        Pre-Requisite: Ensure the credentials are setup for your connector following the instructions here: https://learn.microsoft.com/power-query/power-query-sdk-vs-code#set-credential
@@ -51,6 +51,7 @@ param(
     [switch]$ValidateQueryFolding,
     [switch]$DetailedResults,
     [switch]$JSONResults,
+    [string]$FunctionSharedSettingsPath,
     [string]$RunPQSDKTestSuitesSettingsPath,
     [switch]$Pipeline
 )
@@ -61,6 +62,11 @@ param(
 # Retrieving the settings for running the TestSuites from the JSON settings file
 if ($RunPQSDKTestSuitesSettingsPath) {
     $RunPQSDKTestSuitesSettings = Get-Content -Path $RunPQSDKTestSuitesSettingsPath | ConvertFrom-Json
+}
+
+# Retrieving the settings for functions that need to be set to shared from the JSON settings file
+if ($FunctionSharedSettingsPath) {
+    $FunctionSharedSettings = Get-Content -Path $FunctionSharedSettingsPath | ConvertFrom-Json
 }
 
 # Setting the PQTestExePath from settings object if not passed as an argument
@@ -209,6 +215,42 @@ if (!$Pipeline) {
     }
 }
 
+# Add shared to the functions and compile
+if ($FunctionSharedSettings.Functions) {
+    $ProjectName = [System.IO.Path]::GetFileNameWithoutExtension($ExtensionPath)
+    $TempProjectPath = "temp\$ProjectName"
+    if (!(Test-Path -Path $TempProjectPath)) {
+        New-Item -ItemType Directory -Path $TempProjectPath 
+    } 
+    Copy-Item $ExtensionPath "$TempProjectPath\$ProjectName.zip"
+    Expand-Archive -Path "$TempProjectPath\$ProjectName.zip" -DestinationPath $TempProjectPath -Force
+    $PQFile = "$TempProjectPath\$ProjectName.pq"
+    Remove-Item "$TempProjectPath\$ProjectName.zip"
+    $PQFileContent = (Get-Content $PQFile)
+    foreach ($item in $FunctionSharedSettings.Functions) {
+        Write-Output ("Function replaced: " + $item )
+        $PQFileContent = $PQFileContent.Replace("$item =", "shared $item =")
+    }
+    While ($True) {
+        try {
+            $PQFileContent | Set-Content $PQFile
+            break
+        }
+        catch {
+            Write-Output "Error in saving $PQFile"
+            Start-Sleep -Seconds 1 # wait for a seconds before next attempt.
+        }
+    }  
+    Push-Location
+    Set-Location $TempProjectPath
+    # find the latest MakePQX.exe
+    $PQXMakePQXPath = Get-ChildItem "$home\.vscode\extensions" -recurse -include "MakePQX.exe" | Select-Object -last 1 | ForEach-Object { $_.FullName }
+    Invoke-expression "$PQXMakePQXPath compile"
+    Pop-Location
+    $ExtensionPath = Get-ChildItem -Path "$TempProjectPath\bin\AnyCPU\Debug\$ProjectName.mez" | ForEach-Object { $_.FullName }
+}
+
+
 # Creating the DiagnosticFolderPath if ValidateQueryFolding is set to true
 if ($ValidateQueryFolding) { 
     $DiagnosticFolderPath = Join-Path -Path (Get-Location) -ChildPath ("Diagnostics\" + (Get-Item $ExtensionPath).Basename)
@@ -321,6 +363,10 @@ Duration
 Write-Output("----------------------------------------------------------------------------------------------")
 Write-Output("Total Tests: " + $TestCount + " | Passed: " + $Passed + " | Failed: " + $Failed + " | Total Duration: " + "{0:dd}d:{0:hh}h:{0:mm}m:{0:ss}s" -f (NEW-TIMESPAN -Start $TestExecStartTime  -End $TestExecEndTime))
 Write-Output("----------------------------------------------------------------------------------------------")
+
+if ($FunctionSharedSettings.Functions) {
+    Remove-Item temp -Recurse -Force -Confirm:$false
+}
 
 if ($Failed -gt 0) {
     exit -1
