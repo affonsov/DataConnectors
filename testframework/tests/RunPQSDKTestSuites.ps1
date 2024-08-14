@@ -51,6 +51,7 @@ param(
     [switch]$ValidateQueryFolding,
     [switch]$DetailedResults,
     [switch]$JSONResults,
+    [string]$FunctionSharedSettingsPath,
     [string]$RunPQSDKTestSuitesSettingsPath,
     [switch]$Pipeline
 )
@@ -66,6 +67,11 @@ if ($RunPQSDKTestSuitesSettingsPath) {
     else {
         $RunPQSDKTestSuitesSettings = Get-Content -Path $RunPQSDKTestSuitesSettingsPath | ConvertFrom-Json
     }
+}
+
+# Retrieving the settings for functions that need to be set to shared from the JSON settings file
+if ($FunctionSharedSettingsPath) {
+    $FunctionSharedSettings = Get-Content -Path $FunctionSharedSettingsPath | ConvertFrom-Json
 }
 
 # Setting the PQTestExePath from settings object if not passed as an argument
@@ -214,6 +220,58 @@ if (!$Pipeline) {
     }
 }
 
+# Add shared to the functions and compile
+if ($FunctionSharedSettings.Functions) {
+    # Get Project Name from the mez file provided by the user
+    $ProjectName = [System.IO.Path]::GetFileNameWithoutExtension($ExtensionPath)
+
+    # Create a temporary folder that will have the connector so we can add the shared to the functions
+    $TempProjectPath = "temp\$ProjectName"
+    if (!(Test-Path -Path $TempProjectPath)) {
+        New-Item -ItemType Directory -Path $TempProjectPath 
+    } 
+    Copy-Item $ExtensionPath "$TempProjectPath\$ProjectName.zip"
+    Expand-Archive -Path "$TempProjectPath\$ProjectName.zip" -DestinationPath $TempProjectPath -Force
+    Remove-Item "$TempProjectPath\$ProjectName.zip"
+
+    # Get the content from the pq file to add the shared keyword to the functions
+    $PQFile = "$TempProjectPath\$ProjectName.pq"
+    $PQFileContent = (Get-Content $PQFile)
+    
+    # Loop through the FunctionSharedSettings and add the shared keyword in the PQFile content
+    foreach ($item in $FunctionSharedSettings.Functions) {
+        Write-Output ("Function replaced: " + $item )
+        $PQFileContent = $PQFileContent.Replace("$item =", "shared $item =")
+    }
+
+    # Try to save the  PQfile
+    $Tentatives = 0
+    While ($Tentatives -le 10) {
+        try {
+            $PQFileContent | Set-Content $PQFile
+            Write-Output "$PQFile saved successfully"
+            break
+        }
+        catch {
+            Write-Output "Error in saving $PQFile"
+            Start-Sleep -Seconds 1 # wait for a seconds before next attempt.
+        }
+        $Tentatives++
+    } 
+
+    Push-Location
+    # Change folder location
+    Set-Location $TempProjectPath
+    # Find the latest MakePQX.exe
+    $PQXMakePQXPath = Get-ChildItem "$home\.vscode\extensions" -recurse -include "MakePQX.exe" | Select-Object -last 1 | ForEach-Object { $_.FullName }
+    Invoke-expression "$PQXMakePQXPath compile"
+    Pop-Location
+
+    # set the new mez file with shared function so testframework used this to run the tests
+    $ExtensionPath = Get-ChildItem -Path "$TempProjectPath\bin\AnyCPU\Debug\$ProjectName.mez" | ForEach-Object { $_.FullName }
+}
+
+
 # Creating the DiagnosticFolderPath if ValidateQueryFolding is set to true
 if ($ValidateQueryFolding) { 
     $DiagnosticFolderPath = Join-Path -Path (Get-Location) -ChildPath ("Diagnostics\" + (Get-Item $ExtensionPath).Basename)
@@ -327,6 +385,11 @@ Duration
 Write-Output("----------------------------------------------------------------------------------------------")
 Write-Output("Total Tests: " + $TestCount + " | Passed: " + $Passed + " | Failed: " + $Failed + " | Total Duration: " + "{0:dd}d:{0:hh}h:{0:mm}m:{0:ss}s" -f (NEW-TIMESPAN -Start $TestExecStartTime  -End $TestExecEndTime))
 Write-Output("----------------------------------------------------------------------------------------------")
+
+# Delte the temporary folder created to store the mez file with shared functions
+if ($FunctionSharedSettings.Functions) {
+    Remove-Item temp -Recurse -Force -Confirm:$false
+}
 
 if ($Failed -gt 0) {
     exit -1
