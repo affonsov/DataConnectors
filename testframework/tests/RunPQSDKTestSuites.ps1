@@ -61,7 +61,12 @@ param(
 
 # Retrieving the settings for running the TestSuites from the JSON settings file
 if ($RunPQSDKTestSuitesSettingsPath) {
-    $RunPQSDKTestSuitesSettings = Get-Content -Path $RunPQSDKTestSuitesSettingsPath | ConvertFrom-Json
+    if ([string]::IsNullOrEmpty($RunPQSDKTestSuitesSettingsPath) -or !(Test-Path -Path $RunPQSDKTestSuitesSettingsPath)) {
+        $RunPQSDKTestSuitesSettings = Get-Content -Path RunPQSDKTestSuitesSettings.json | ConvertFrom-Json
+    }
+    else {
+        $RunPQSDKTestSuitesSettings = Get-Content -Path $RunPQSDKTestSuitesSettingsPath | ConvertFrom-Json
+    }
 }
 
 # Retrieving the settings for functions that need to be set to shared from the JSON settings file
@@ -329,6 +334,7 @@ if ($JSONResults) {
     Write-Output("PQ SDK Test Framework - Test Execution - JSON Results for Extension: " + $ExtensionPath.Split("\")[-1] )
     Write-Output("-----------------------------------------------------------------------------------")
     $RawTestResults | Set-content results.json
+    Write-Output("The file results.json was created with the tests results")
 }
 
 Write-Output("----------------------------------------------------------------------------------------------")
