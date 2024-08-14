@@ -3,7 +3,7 @@
        Script: RunPQSDKTestSuites.ps1
        Runs the pre-built PQ/PQOut format tests in Power Query SDK Test Framework using pqtest.exe compare command.
 
-      .DESCRIPTION
+       .DESCRIPTION
        This script will execute the PQ SDK PQ/PQOut tests present under Sanity, Standard & DataSourceSpecific folders. 
        RunPQSDKTestSuitesSettings.json file is used provide configurations need to this script. Please review the template RunPQSDKTestSuitesSettingsTemplate.json for more info.
        Pre-Requisite: Ensure the credentials are setup for your connector following the instructions here: https://learn.microsoft.com/power-query/power-query-sdk-vs-code#set-credential
@@ -60,7 +60,12 @@ param(
 
 # Retrieving the settings for running the TestSuites from the JSON settings file
 if ($RunPQSDKTestSuitesSettingsPath) {
-    $RunPQSDKTestSuitesSettings = Get-Content -Path $RunPQSDKTestSuitesSettingsPath | ConvertFrom-Json
+    if ([string]::IsNullOrEmpty($RunPQSDKTestSuitesSettingsPath) -or !(Test-Path -Path $RunPQSDKTestSuitesSettingsPath)) {
+        $RunPQSDKTestSuitesSettings = Get-Content -Path RunPQSDKTestSuitesSettings.json | ConvertFrom-Json
+    }
+    else {
+        $RunPQSDKTestSuitesSettings = Get-Content -Path $RunPQSDKTestSuitesSettingsPath | ConvertFrom-Json
+    }
 }
 
 # Setting the PQTestExePath from settings object if not passed as an argument
@@ -287,6 +292,7 @@ if ($JSONResults) {
     Write-Output("PQ SDK Test Framework - Test Execution - JSON Results for Extension: " + $ExtensionPath.Split("\")[-1] )
     Write-Output("-----------------------------------------------------------------------------------")
     $RawTestResults | Set-content results.json
+    Write-Output("The file results.json was created with the tests results")
 }
 
 Write-Output("----------------------------------------------------------------------------------------------")
